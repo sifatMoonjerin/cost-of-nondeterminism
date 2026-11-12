@@ -1,0 +1,4 @@
+__pycache__/
+.DS_Store
+# Experiment databases are large and can be regenerated with the scripts in src/experiments
+*.duckdb

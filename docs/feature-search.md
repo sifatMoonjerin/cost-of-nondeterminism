@@ -50,7 +50,17 @@ Share of NFAs that are extreme, by trait value (baseline 5.2 %):
 
 Run `cd src && python -m experiments.feature_search_extras` (needs scikit-learn and scipy). Output: `data/experiment_10k/feature_search_extras/`.
 
-1. **Significance.** A Mann-Whitney U test per trait on the within-group z-scores, extreme vs rest. For the top-5 % definition, **19 of 24 traits have p < 0.001** (smallest 2 × 10⁻⁵⁴, for average branching). The five that do not are `max_accept_depth` (p = 0.81), `symbol_coverage` and `missing_slot_frac` (0.099 each, the same information), `start_nondet` (0.027) and `in_degree_1_frac` (0.006). Those traits do not separate extreme NFAs from the rest.
+1. **Significance.** A Mann-Whitney U test per trait on the within-group z-scores (extreme vs rest). A small p-value means a difference this large would be unlikely if extreme NFAs were drawn at random from the same group. With 24 traits tested, a trait is called significant only if p < 0.05 / 24 = 0.002 (Bonferroni correction). For the top-5 % definition, **19 of 24 traits pass** (smallest p = 2 × 10⁻⁵⁴, average branching). The five that do not:
+
+   | Trait | z difference | Extreme mean | Rest mean | p |
+   |---|---|---|---|---|
+   | `in_degree_1_frac` (share of states with exactly one incoming edge) | +0.12 | 0.144 | 0.153 | 0.006 |
+   | `start_nondet` (q0 has a non-deterministic choice) | −0.21 | 0.739 | 0.790 | 0.027 |
+   | `symbol_coverage` | +0.08 | 0.879 | 0.858 | 0.099 |
+   | `missing_slot_frac` (= 1 − symbol coverage, same test) | −0.08 | 0.121 | 0.142 | 0.099 |
+   | `max_accept_depth` | −0.04 | 2.13 | 2.18 | 0.81 |
+
+   Two of these (0.006 and 0.027) are below 0.05 without the correction, so "does not separate" means "not distinguishable from chance once 24 tests are accounted for", and their differences are small anyway. A mean-based test can also miss traits whose effect is an inverted U (see the bin tables above).
 2. **How predictive are the traits?** A random forest (300 trees) predicts "extreme" from the within-group z-scored traits plus two extra ratios (symbol edges per state, share of slots with exactly one destination). **5-fold cross-validated AUC = 0.82**, where 0.5 is chance and 1.0 is perfect: the traits carry real signal but do not determine which NFAs are extreme. The traits the forest relies on most (AUC lost when shuffled): ε edges 0.020, accepting states 0.017, deterministic-slot share 0.014, average branching 0.010.
 3. **Does the definition of "extreme" matter?** Repeating the comparison with the top **1 %** (122 NFAs) and with the raw **subset** DFA (528 NFAs) gives the same leading traits: average branching, non-deterministic pairs, out- and in-degree. Effects are larger for the top 1 % (branching z = −0.98 vs −0.70). For the subset DFA, ε edges and missing (state, symbol) transitions rank higher, since minimization has not yet merged the ε-induced duplicates.
 

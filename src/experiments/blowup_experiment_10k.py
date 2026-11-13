@@ -112,43 +112,49 @@ def style_axis(ax, grid_axis="y"):
         ax.spines[side].set_visible(False)
 
 
+VIOLIN_TICKS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24]
+
+
+def load_violin_frame(con):
+    return con.sql("SELECT nfa_type, original_states, subset_states, dfa_states FROM random_nfas").df()
+
+
+def draw_larger_violin(ax, df, column, title, class_names_only=False):
+    # Violins of log2(DFA states / NFA states) for the NFAs whose DFA is larger, one per class
+    top = np.log2(df["subset_states"].div(df["original_states"]).max()) + 0.3
+    ratio = df[column] / df["original_states"]
+    totals = df.groupby("nfa_type").size()
+    larger = df[ratio > 1].assign(log_ratio=np.log2(ratio[ratio > 1]))
+    medians = larger.assign(ratio=2 ** larger["log_ratio"]).groupby("nfa_type")["ratio"].median()
+
+    sns.violinplot(data=larger, x="nfa_type", y="log_ratio", order=RANDOM_CLASSES, hue="nfa_type",
+                   palette=CLASS_COLORS, legend=False, inner=None, cut=0, density_norm="width",
+                   linewidth=1, saturation=1, ax=ax)
+    sns.stripplot(data=larger, x="nfa_type", y="log_ratio", order=RANDOM_CLASSES, color="black",
+                  size=1.2, alpha=0.2, jitter=0.18, ax=ax)
+
+    labels = []
+    for i, name in enumerate(RANDOM_CLASSES):
+        count = int((larger["nfa_type"] == name).sum())
+        ax.hlines(np.log2(medians[name]), i - 0.3, i + 0.3, color="black", linewidth=2, zorder=5)
+        ax.text(i + 0.34, np.log2(medians[name]), f"{medians[name]:.1f}×", va="center", fontsize=10, fontweight="bold")
+        labels.append(name if class_names_only else f"{name}\n{100 * count / totals[name]:.0f}% larger\n(n={count} of {totals[name]})")
+
+    ax.set_xticks(range(len(RANDOM_CLASSES)), labels, fontsize=9)
+    ax.set_yticks(np.log2(VIOLIN_TICKS), [f"{t:g}×" for t in VIOLIN_TICKS])
+    ax.set_ylim(-0.05, top)
+    ax.axhline(0, color="black", linestyle="--", linewidth=1)
+    ax.set_xlabel("")
+    ax.set_title(title, fontsize=12)
+    style_axis(ax)
+
+
 def plot_larger_violin(con, path):
     # How much larger is the DFA, for the NFAs where it is larger? Log-scaled ratio, minimized vs subset-construction DFA.
-    df = con.sql("SELECT nfa_type, original_states, subset_states, dfa_states FROM random_nfas").df()
+    df = load_violin_frame(con)
     fig, axes = plt.subplots(1, 2, figsize=(15, 5.8), sharey=True)
-    ticks = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24]
-    top = np.log2(df["subset_states"].div(df["original_states"]).max()) + 0.3
-
-    for ax, column, title in [
-        (axes[0], "dfa_states", "Minimized DFA"),
-        (axes[1], "subset_states", "Raw subset-construction DFA"),
-    ]:
-        ratio = df[column] / df["original_states"]
-        totals = df.groupby("nfa_type").size()
-        larger = df[ratio > 1].assign(log_ratio=np.log2(ratio[ratio > 1]))
-        medians = larger.assign(ratio=2 ** larger["log_ratio"]).groupby("nfa_type")["ratio"].median()
-
-        sns.violinplot(data=larger, x="nfa_type", y="log_ratio", order=RANDOM_CLASSES, hue="nfa_type",
-                       palette=CLASS_COLORS, legend=False, inner=None, cut=0, density_norm="width",
-                       linewidth=1, saturation=1, ax=ax)
-        sns.stripplot(data=larger, x="nfa_type", y="log_ratio", order=RANDOM_CLASSES, color="black",
-                      size=1.2, alpha=0.2, jitter=0.18, ax=ax)
-
-        labels = []
-        for i, name in enumerate(RANDOM_CLASSES):
-            count = int((larger["nfa_type"] == name).sum())
-            ax.hlines(np.log2(medians[name]), i - 0.3, i + 0.3, color="black", linewidth=2, zorder=5)
-            ax.text(i + 0.34, np.log2(medians[name]), f"{medians[name]:.1f}×", va="center", fontsize=10, fontweight="bold")
-            labels.append(f"{name}\n{100 * count / totals[name]:.0f}% larger\n(n={count} of {totals[name]})")
-
-        ax.set_xticks(range(len(RANDOM_CLASSES)), labels, fontsize=9)
-        ax.set_yticks(np.log2(ticks), [f"{t:g}×" for t in ticks])
-        ax.set_ylim(-0.05, top)
-        ax.axhline(0, color="black", linestyle="--", linewidth=1)
-        ax.set_xlabel("")
-        ax.set_title(title, fontsize=12)
-        style_axis(ax)
-
+    draw_larger_violin(axes[0], df, "dfa_states", "Minimized DFA")
+    draw_larger_violin(axes[1], df, "subset_states", "Raw subset-construction DFA")
     axes[0].set_ylabel("DFA states ÷ NFA states (log scale)")
     fig.suptitle("How much larger? Size of the DFA relative to its NFA, for the NFAs whose DFA is larger (black bar = median)", fontsize=13)
     fig.tight_layout()
@@ -156,16 +162,27 @@ def plot_larger_violin(con, path):
     plt.close(fig)
 
 
-def plot_ceiling_approach(con, path):
-    # Minimized DFA size against the 2^n ceiling, and how far toward it the "larger" cases get
+def plot_larger_violin_minimized(con, path):
+    # The left panel of the violin figure on its own, without the overall header
+    fig, ax = plt.subplots(figsize=(8, 5.8))
+    draw_larger_violin(ax, load_violin_frame(con), "dfa_states", "volumetric analysis of complex DFAs", class_names_only=True)
+    ax.set_ylabel("DFA states ÷ NFA states")
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def load_ceiling_frame(con):
     df = con.sql("SELECT nfa_type, original_states AS n, dfa_states AS m FROM random_nfas").df()
     df["larger"] = df["m"] > df["n"]
     # Share of the ceiling in the exponent: 1.0 means 2^n states, 0.5 means 2^(n/2)
     df["fraction"] = np.log2(df["m"]) / df["n"]
+    return df
+
+
+def draw_ceiling_scatter(ax_a, df, title):
     jitter = np.random.default_rng(0).uniform(-0.28, 0.28, len(df))
     log_states = np.log2(df["m"])
-
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(15.5, 6.2), gridspec_kw={"width_ratios": [1.2, 1]})
 
     ax_a.scatter((df["n"] + jitter)[~df["larger"]], log_states[~df["larger"]], s=8, color="#9E9E9E", alpha=0.35,
                  label="DFA same size or smaller", linewidths=0)
@@ -181,9 +198,27 @@ def plot_ceiling_approach(con, path):
     ax_a.set_yticks(ticks, [f"{2 ** t:,}" for t in ticks])
     ax_a.set_xlabel("NFA states (n)")
     ax_a.set_ylabel("Minimized DFA states (log scale)")
-    ax_a.set_title("A. Minimized DFA size against the 2$^n$ ceiling", fontsize=12)
+    ax_a.set_title(title, fontsize=12)
     ax_a.legend(loc="upper left", frameon=False, fontsize=9)
     style_axis(ax_a, "both")
+
+
+def plot_ceiling_scatter(con, path):
+    # Panel A of the ceiling figure on its own, without the overall header
+    df = load_ceiling_frame(con)
+    fig, ax = plt.subplots(figsize=(8.5, 6.2))
+    draw_ceiling_scatter(ax, df, "Minimized DFA size against the 2$^n$ ceiling")
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def plot_ceiling_approach(con, path):
+    # Minimized DFA size against the 2^n ceiling, and how far toward it the "larger" cases get
+    df = load_ceiling_frame(con)
+
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(15.5, 6.2), gridspec_kw={"width_ratios": [1.2, 1]})
+    draw_ceiling_scatter(ax_a, df, "A. Minimized DFA size against the 2$^n$ ceiling")
 
     larger = df[df["larger"]]
     sns.violinplot(data=larger, x="nfa_type", y="fraction", order=RANDOM_CLASSES, hue="nfa_type", palette=CLASS_COLORS,
@@ -230,7 +265,17 @@ def main():
     parser.add_argument("--min-states", type=int, default=5)
     parser.add_argument("--max-states", type=int, default=12)
     parser.add_argument("--out-dir", type=Path, default=EXPERIMENT_10K_DIR)
+    parser.add_argument("--scatter-only", action="store_true",
+                        help="redraw only the single-panel figures (ceiling_scatter, larger_dfa_violin_minimized) from the existing database, generating nothing new")
     args = parser.parse_args()
+
+    if args.scatter_only:
+        use_georgia()
+        con = duckdb.connect(str(args.out_dir / DATABASE_NAME), read_only=True)
+        plot_ceiling_scatter(con, args.out_dir / "figures" / "ceiling_scatter.png")
+        plot_larger_violin_minimized(con, args.out_dir / "figures" / "larger_dfa_violin_minimized.png")
+        print(f"Wrote ceiling_scatter.png and larger_dfa_violin_minimized.png to {args.out_dir / 'figures'}")
+        return
 
     figures_dir = args.out_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
@@ -263,7 +308,9 @@ def main():
         "Random NFA's Compared to Subset Construction DFA", figures_dir / "subset_size_outcome_by_type.png",
     )
     plot_larger_violin(con, figures_dir / "larger_dfa_violin.png")
+    plot_larger_violin_minimized(con, figures_dir / "larger_dfa_violin_minimized.png")
     ceiling = plot_ceiling_approach(con, figures_dir / "ceiling_approach.png")
+    plot_ceiling_scatter(con, figures_dir / "ceiling_scatter.png")
 
     for title, view in [
         ("Share of NFAs whose minimized DFA is larger, by NFA type", "larger_rate_by_type"),

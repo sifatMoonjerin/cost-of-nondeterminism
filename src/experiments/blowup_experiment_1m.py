@@ -257,9 +257,7 @@ def plot_larger_violin(df, path):
     plt.close(fig)
 
 
-def plot_ceiling_approach(df, path):
-    # Left: a sample of NFAs against the 2^n ceiling, with the highest point reached at each NFA size.
-    # Right: how far toward the ceiling (in the exponent) the larger DFAs get, per class.
+def draw_ceiling_scatter(ax_a, df, title, legend_outside=False):
     sample = df.sample(min(SCATTER_SAMPLE, len(df)), random_state=0)
     jitter = np.random.default_rng(0).uniform(-0.28, 0.28, len(sample))
     log_states = np.log2(sample["dfa_states"])
@@ -269,8 +267,6 @@ def plot_ceiling_approach(df, path):
     single_size = df["original_states"].nunique() == 1
     x_column = "total_transitions" if single_size else "original_states"
 
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(15.5, 6.2), gridspec_kw={"width_ratios": [1.2, 1]})
-
     ax_a.scatter((sample[x_column] + jitter)[~larger], log_states[~larger], s=4, color="#9E9E9E", alpha=0.25,
                  label="DFA same size or smaller", linewidths=0)
     ax_a.scatter((sample[x_column] + jitter)[larger], log_states[larger], s=5, color="#D9534F", alpha=0.3,
@@ -279,7 +275,7 @@ def plot_ceiling_approach(df, path):
     grouped = df.groupby(x_column)["dfa_states"]
     counts_per_x = grouped.size()
     keep = counts_per_x[counts_per_x >= 200].index
-    ax_a.plot(keep, np.log2(grouped.max()[keep]), "^", color="black", markersize=9, label=f"highest of all {len(df):,}", zorder=6)
+    ax_a.plot(keep, np.log2(grouped.max()[keep]), "^", color="black", markersize=9, label=f"Largest of transition size group", zorder=6)
     ax_a.plot(keep, np.log2(grouped.quantile(0.999)[keep]), "D", color="#1F3A6E", markersize=6, label="99.9th percentile", zorder=6)
 
     x_range = np.linspace(df[x_column].min() - 0.8, df[x_column].max() + 0.8, 100)
@@ -300,9 +296,74 @@ def plot_ceiling_approach(df, path):
     ticks = list(range(0, n_max + 1, 2))
     ax_a.set_yticks(ticks, [f"{2 ** tick:,}" for tick in ticks])
     ax_a.set_ylabel("Minimized DFA states (log scale)")
-    ax_a.set_title(f"A. Minimized DFA size against the 2$^n$ ceiling ({len(sample):,}-NFA sample)", fontsize=12)
-    ax_a.legend(loc="upper left", frameon=False, fontsize=8.5)
+    ax_a.set_title(title.format(sample=len(sample)), fontsize=12)
+    if legend_outside:
+        ax_a.legend(loc="upper left", bbox_to_anchor=(1.02, 1), frameon=False, fontsize=10)
+    else:
+        ax_a.legend(loc="upper left", frameon=False, fontsize=8.5)
     style_axis(ax_a, "both")
+
+
+def plot_ceiling_hexbin(df, path):
+    # Every NFA is binned (no sampling), so dense areas show as colour instead of overplotted dots; the colour is log-scaled counts
+    single_size = df["original_states"].nunique() == 1
+    x_column = "total_transitions" if single_size else "original_states"
+    n_max = int(df["original_states"].max())
+    log_states = np.log2(df["dfa_states"])
+
+    fig, ax = plt.subplots(figsize=(13, 6.2))
+    x_range = np.linspace(df[x_column].min() - 0.8, df[x_column].max() + 0.8, 100)
+    hexes = ax.hexbin(df[x_column], log_states, gridsize=(max(int(df[x_column].max() - df[x_column].min()) + 1, 8), n_max * 3),
+                      extent=(x_range[0], x_range[-1], 0, n_max + 1.2), bins="log", cmap="YlOrRd", mincnt=1, linewidths=0.2, zorder=2)
+    colorbar = fig.colorbar(hexes, ax=ax, pad=0.01, fraction=0.04)
+    colorbar.set_label("NFAs per hexagon")
+
+    grouped = df.groupby(x_column)["dfa_states"]
+    keep = grouped.size()[lambda counts: counts >= 200].index
+    ax.plot(keep, np.log2(grouped.max()[keep]), "^", color="black", markersize=8, label=f"highest of all {len(df):,}", zorder=6)
+
+    if single_size:
+        ax.axhline(n_max, color="black", linewidth=1.6, linestyle="--", label=f"ceiling: 2$^{{{n_max}}}$ = {2 ** n_max:,} states")
+        ax.axhline(n_max / 2, color="#444444", linewidth=1.2, linestyle=":", label=f"halfway (exponent): 2$^{{{n_max // 2}}}$ = {2 ** (n_max // 2)} states")
+        ax.axhline(np.log2(n_max), color="black", linewidth=1.2, label=f"NFA size: {n_max} states")
+        ax.set_xlabel("NFA transitions (symbol and ε edges)")
+    else:
+        ax.plot(x_range, x_range, color="black", linewidth=1.6, linestyle="--", label="ceiling: 2$^n$ states")
+        ax.plot(x_range, x_range / 2, color="#444444", linewidth=1.2, linestyle=":", label="halfway (exponent): 2$^{n/2}$")
+        ax.plot(x_range, np.log2(x_range), color="black", linewidth=1.2, label="NFA size: n states")
+        ax.set_xlabel("NFA states (n)")
+
+    ax.set_xlim(x_range[0], x_range[-1])
+    if df[x_column].nunique() <= 8:
+        # Few distinct x values (e.g. a generator that fixes the edge count): label whole numbers only
+        ax.set_xticks(sorted(df[x_column].unique()))
+    ax.set_ylim(0, n_max + 1.2)
+    ticks = list(range(0, n_max + 1, 2))
+    ax.set_yticks(ticks, [f"{2 ** tick:,}" for tick in ticks])
+    ax.set_ylabel("Minimized DFA states")
+    ax.set_title("Minimized DFA size against the 2$^n$ ceiling", fontsize=12)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.12, 1), frameon=False, fontsize=10)
+    style_axis(ax, "both")
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def plot_ceiling_scatter(df, path):
+    # Left panel of the ceiling figure on its own: no overall header, legend beside the axes so it covers no points
+    fig, ax = plt.subplots(figsize=(13, 6.2))
+    draw_ceiling_scatter(ax, df, "Minimized DFA size against the 2$^n$ ceiling ({sample:,}-NFA sample)", legend_outside=True)
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def plot_ceiling_approach(df, path):
+    # Left: a sample of NFAs against the 2^n ceiling, with the highest point reached at each NFA size.
+    # Right: how far toward the ceiling (in the exponent) the larger DFAs get, per class.
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(15.5, 6.2), gridspec_kw={"width_ratios": [1.2, 1]})
+
+    draw_ceiling_scatter(ax_a, df, "A. Minimized DFA size against the 2$^n$ ceiling ({sample:,}-NFA sample)")
 
     larger_all = df[df["larger_in_states"]]
     medians = draw_violins(ax_b, larger_all, "exponent_fraction", larger_all, lambda values: values)
@@ -324,6 +385,8 @@ def plot_ceiling_approach(df, path):
     ax_b.set_title("B. How close do the 'larger' DFAs get?", fontsize=12)
     style_axis(ax_b)
 
+    n_max = int(df["original_states"].max())
+    single_size = df["original_states"].nunique() == 1
     size_text = f"{n_max}-state" if single_size else f"{df['original_states'].min()}–{n_max} states"
     fig.suptitle(f"Do larger DFAs approach the 2$^n$ ceiling?  ({len(df):,} random NFAs, "
                  f"{size_text}; blow-up family excluded)", fontsize=13)
@@ -342,7 +405,18 @@ def main():
     parser.add_argument("--max-states", type=int, default=12)
     parser.add_argument("--workers", type=int, default=None, help="default: one per CPU core")
     parser.add_argument("--out-dir", type=Path, default=EXPERIMENT_1M_DIR)
+    parser.add_argument("--scatter-only", action="store_true",
+                        help="redraw only the single-panel figures (ceiling_scatter, ceiling_hexbin) from the existing database, generating nothing new")
     args = parser.parse_args()
+
+    if args.scatter_only:
+        use_georgia()
+        con = duckdb.connect(str(args.out_dir / DATABASE_NAME), read_only=True)
+        df = con.sql("SELECT * FROM nfa_results").df()
+        plot_ceiling_scatter(df, args.out_dir / "figures" / "ceiling_scatter.png")
+        plot_ceiling_hexbin(df, args.out_dir / "figures" / "ceiling_hexbin.png")
+        print(f"Wrote ceiling_scatter.png and ceiling_hexbin.png to {args.out_dir / 'figures'}")
+        return
 
     figures_dir = args.out_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
@@ -377,6 +451,8 @@ def main():
     use_georgia()
     plot_larger_violin(df, figures_dir / "larger_dfa_violin.png")
     plot_ceiling_approach(df, figures_dir / "ceiling_approach.png")
+    plot_ceiling_scatter(df, figures_dir / "ceiling_scatter.png")
+    plot_ceiling_hexbin(df, figures_dir / "ceiling_hexbin.png")
 
     closest = df.nlargest(10, "exponent_fraction")[["nfa_key", "nfa_type", "original_states", "dfa_states", "share_of_ceiling", "exponent_fraction"]]
     print("\nClosest to the ceiling (by exponent fraction):")

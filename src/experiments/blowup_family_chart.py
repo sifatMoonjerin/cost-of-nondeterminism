@@ -41,7 +41,7 @@ def plot_family(rows, path):
     ax.bar_label(dfa_bars, fontsize=9, padding=2)
 
     ax.set_xticks(x, [str(n) for n in ns])
-    ax.set_xlabel("n (the NFA has n + 1 states)")
+    ax.set_xlabel("n")
     ax.set_ylim(0, max(dfa_counts) * 1.08)
     ax.set_title("NFA states and DFA states vs. n", fontsize=12)
     ax.grid(axis="y", color="#D9D9D9")

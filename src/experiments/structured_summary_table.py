@@ -35,7 +35,7 @@ def times(structured, baseline, decimals=0):
 
 
 def ceiling_cell(hits, total):
-    return f"{hits:,}\n(1 in {round(total / hits):,})" if hits else "0"
+    return f"{hits:,}"
 
 
 def build_rows():
@@ -47,13 +47,13 @@ def build_rows():
         ceiling = summary["ceiling"]
         cuts = [ceiling // 4, ceiling // 2, 3 * ceiling // 4]
 
-        label = f"{n} states\nceiling {ceiling}\n(¼ = {cuts[0]}, ½ = {cuts[1]},\n¾ = {cuts[2]})"
-        for who, row in (("structured", structured), ("unrestricted\n(no ε)", baseline)):
+        label = f"{n} states"
+        for who, row in (("structured", structured), ("unrestricted", baseline)):
             hits = int(row["at_ceiling"])
-            rows.append([label if who == "unrestricted\n(no ε)" else "", who, f"{row['nfas']:,.0f}", f"{row['median_dfa_states']:.0f}"]
+            rows.append([label if who == "unrestricted" else "", who, f"{row['nfas']:,.0f}", f"{row['median_dfa_states']:.0f}"]
                         + [share(row[f"pct_at_least_{cut}"]) for cut in cuts] + [ceiling_cell(hits, int(row["nfas"]))])
             kinds.append("structured" if who == "structured" else "unrestricted")
-        rows.append(["", "structured ÷\nunrestricted", "", times(structured["median_dfa_states"], baseline["median_dfa_states"], 1)]
+        rows.append(["", "ratio", "", times(structured["median_dfa_states"], baseline["median_dfa_states"], 1)]
                     + [times(structured[f"pct_at_least_{cut}"], baseline[f"pct_at_least_{cut}"]) for cut in cuts]
                     + [times(summary["at_ceiling"], summary["baseline_at_ceiling"]) if summary["baseline_at_ceiling"] else f"{summary['at_ceiling']} vs 0"])
         kinds.append("ratio")
@@ -65,7 +65,7 @@ def main():
     rows, kinds = build_rows()
     widths = [0.15, 0.12, 0.10, 0.10, 0.12, 0.12, 0.12, 0.13]
 
-    fig, ax = plt.subplots(figsize=(13, 9.2))
+    fig, ax = plt.subplots(figsize=(13, 8.6))
     ax.axis("off")
     table = ax.table(cellText=rows, colLabels=COLUMNS, colWidths=widths, cellLoc="center", loc="upper center")
     table.auto_set_font_size(False)
@@ -88,13 +88,9 @@ def main():
             cell.set_facecolor(LABEL_COLOR)
             cell.set_text_props(fontweight="bold", va="center")
 
-    ax.set_title("Structured NFAs against the unrestricted generator, 1,000,000 NFAs each per size",
+    ax.set_title("Structured vs unrestricted NFAs",
                  fontsize=14, fontweight="bold", pad=6)
-    fig.text(0.5, 0.045, "Structured: one undefined (state, symbol) slot, 1-3 accepting states, 1-3 non-deterministic pairs, no ε edges.   "
-             "Unrestricted: the random generator's sparse, mixed and dense classes (no ε edges).\n"
-             "Percentages are the share of NFAs whose minimized DFA has at least that many states. "
-             "The ratio row is structured ÷ unrestricted ('–' = no ratio).", ha="center", fontsize=9.5, style="italic")
-    fig.tight_layout(rect=(0, 0.08, 1, 0.98))
+    fig.tight_layout()
     path = DATA_DIR / "structured_experiments_table.png"
     fig.savefig(path, dpi=200)
     print(f"Wrote {path}")

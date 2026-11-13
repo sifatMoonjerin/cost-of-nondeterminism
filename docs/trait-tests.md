@@ -1,6 +1,6 @@
 # Trait tests: do the traits actually cause larger DFAs?
 
-Code: `src/experiments/trait_confirmation.py` (`replicate`, `run_interventions`). Output: `data/experiment_10k/trait_confirmation/{replication,replication_by_class,interventions}.csv`. Background: [feature-search.md](feature-search.md), terms: [terms.md](terms.md).
+Code: `src/experiments/trait_confirmation.py` (`replicate`, `run_interventions`, `run_replicated_interventions`; `--interventions-only` reruns just Test B). Output: `data/experiment_10k/trait_confirmation/{replication,replication_by_class,interventions,interventions_by_replication}.csv` and `figures/interventions.png`. Background: [feature-search.md](feature-search.md), terms: [terms.md](terms.md).
 
 The feature search found associations on one dataset. Two further tests check that they are not an accident of that dataset and that they are not just correlation.
 
@@ -21,12 +21,14 @@ The first run of the same idea gave 9.2 %. By class, the profile lifts mixed (�
 
 ## Test B: change one trait at a time (interventions)
 
-**Design.** Take the first 4,000 of the fresh NFAs. For each, apply **one** structural change, rebuild the DFA, and compare with the same NFA's DFA before the change. Because every comparison is *paired on the same NFA*, differences between NFAs cannot explain the result. For each change we record:
+**Design.** Take a fresh sample of 4,000 random NFAs. For each, apply **one** structural change, rebuild the DFA, and compare with the same NFA's DFA before the change. Because every comparison is *paired on the same NFA*, differences between NFAs cannot explain the result. For each change we record:
 - the **size ratio** after / before (mean and median),
 - the share whose DFA **grew** and **shrank**,
 - the **extreme rate** before and after, using the Test A thresholds.
 
-**Changes** (`INTERVENTION_SEED = 11` drives the random choices):
+**Replication.** The whole test is repeated **10 times**, each on an independent fresh balanced sample (`FRESH_SEED + r`, r = 0…9) with its own random choices (`INTERVENTION_SEED + r`, r = 0…9). The table gives the mean over the 10 replications; the 95 % interval is a t-interval across replications, so it covers both which NFAs were drawn and which edges or accepting states each change picked. Ties when choosing the "deepest" state are broken by state number, so a run gives the same numbers under any `PYTHONHASHSEED`.
+
+**Changes:**
 
 | Change | What it does | Applies to |
 |---|---|---|
@@ -40,29 +42,31 @@ The first run of the same idea gave 9.2 %. By class, the profile lifts mixed (�
 
 The two controls change the trait the *opposite* way, so they should shrink the DFA if the traits matter.
 
-**Results**
+**Results** (mean of 10 replications; `trait_confirmation/interventions.csv`, per-replication rows in `interventions_by_replication.csv`, chart `figures/interventions.png`)
 
-| Change | NFAs | Mean × | Median × | % grew | % shrank | Extreme before → after |
+| Change | NFAs per replication | Mean × | Median × | % grew (95 % interval) | % shrank | Extreme before → after |
 |---|---|---|---|---|---|---|
-| keep one accepting state | 2,690 | 1.76 | 1.20 | 57.7 | 10.7 | 4.1 → 7.1 |
-| move accepting state deep | 4,000 | 1.70 | 1.16 | 56.4 | 18.1 | 5.0 → 8.0 |
-| cap branching at 2 | 3,082 | 1.67 | 1.10 | 52.8 | 10.5 | 4.4 → **13.9** |
-| delete ε edges | 2,051 | 2.16 | 1.25 | 57.6 | 11.9 | 5.5 → 4.7 * |
-| combined | 4,000 | 2.41 | 1.40 | 66.2 | 16.8 | 5.0 → 7.4 * |
-| control: add accepting states | 2,669 | 0.85 | 1.00 | 8.5 | **50.0** | 5.6 → 3.4 |
-| control: add random edges | 4,000 | 0.91 | 0.83 | 16.1 | **53.4** | 5.0 → 2.2 |
+| keep one accepting state | ≈ 2,670 | 1.71 | 1.19 | 57.0 (56.3–57.7) | 10.3 | 3.8 → 7.7 |
+| move accepting state deep | 4,000 | 1.68 | 1.16 | 56.3 (55.8–56.9) | 17.2 | 5.2 → 8.4 |
+| cap branching at 2 | ≈ 2,970 | 1.68 | 1.12 | 53.7 (53.0–54.5) | 10.2 | 4.8 → **14.0** |
+| delete ε edges | 2,000 | 2.15 | 1.23 | 57.4 (56.8–58.0) | 11.9 | 5.1 → 4.9 * |
+| combined | 4,000 | 2.35 | 1.38 | 66.3 (65.6–67.0) | 16.2 | 5.2 → 7.9 * |
+| control: add accepting states | ≈ 2,660 | 0.86 | 1.00 | 8.6 (8.1–9.1) | **48.1** | 6.3 → 3.3 |
+| control: add random edges | 4,000 | 0.96 | 0.90 | 17.3 (17.0–17.5) | **51.6** | 5.2 → 2.1 |
 
 \* Without ε edges an NFA behaves like a member of the non-ε class, so its "after" extreme status is judged against that class's thresholds. The DFA gets bigger mostly because the NFA moved to a bigger-DFA class, not because it moved up within its class.
 
+*First pass.* The test was first run once on the first 4,000 of the 12,000 Test A NFAs (`interventions_first_pass.csv`). Its numbers agree with the replicated ones within a point or two (for example 52.8 % grew for capping branching, against 53.7 % here), but three changes depended on unpinned tie-breaking and differed slightly between reruns, which is why the test was replicated with fixed tie-breaking.
+
 ## What the tests show
 
-- **Direction:** changes toward the profile grew the DFA in 53–66 % of NFAs and shrank it in 10–18 %. The opposite changes shrank it in about half and grew it in 9–16 %.
-- **Size:** the *typical* effect is modest (median 1.1–1.4×). Means are higher because a few NFAs jump a lot. Reaching the real extremes needs several traits at once.
+- **Direction:** changes toward the profile grew the DFA in 54–66 % of NFAs and shrank it in 10–17 %. The opposite changes shrank it in about half (48–52 %) and grew it in 9–17 %. The intervals across replications are narrow (about ±1 point), so the direction is not an accident of one sample.
+- **Size:** the *typical* effect is modest (median 1.1–1.4×, 1.12–1.38× in the table). Means are higher because a few NFAs jump a lot. Reaching the real extremes needs several traits at once.
 - **ε edges:** the within-class pattern in the feature search is the cleaner evidence; the deletion test is confounded as described above.
 - **Strongly connected component** was not tested (cannot be changed in isolation).
 
 ## Limits
 
 - Each change alters the language the NFA accepts, so this shows that *structure drives size*, not that one language gets a smaller or larger DFA.
-- One random seed for the changes and one fresh sample.
+- The replications share one NFA generator, one set of extreme thresholds (from the 10k run) and one alphabet; the intervals do not cover those choices.
 - n = 5–12, alphabet {0, 1}.

@@ -13,11 +13,13 @@ import argparse
 import json
 import random
 from collections import deque
+from multiprocessing import Pool
 from pathlib import Path
 
 import duckdb
 import numpy as np
 import pandas as pd
+from scipy.stats import t as student_t
 
 from core.automata import EPSILON, minimize_dfa, nfa_from_dict, nfa_to_dfa, nfa_to_dict
 from experiments.blowup_experiment_10k import EXPERIMENT_10K_DIR, generate_balanced_nfas
@@ -28,6 +30,9 @@ TOP_SHARE = 0.95
 # Order matters: the intervention RNG is shared, so changing it changes which edges get thinned
 INTERVENTION_SEED = 11
 FRESH_SEED = 7
+# The interventions are repeated on independent fresh samples (replication r uses FRESH_SEED + r and INTERVENTION_SEED + r)
+REPLICATIONS = 10
+INTERVENTION_COUNT = 4_000
 
 # Traits compared between extreme and ordinary NFAs
 TRAIT_COLUMNS = [
@@ -321,14 +326,14 @@ def keep_deepest_accept(nfa):
         return None
 
     changed = clone(nfa)
-    changed.accept_states = {max(reachable, key=lambda state: distance[state])}
+    changed.accept_states = {max(reachable, key=lambda state: (distance[state], state))}
     return changed
 
 
 def move_accept_to_deepest_state(nfa):
     distance = get_distances(nfa)
     changed = clone(nfa)
-    changed.accept_states = {max(distance, key=lambda state: distance[state])}
+    changed.accept_states = {max(distance, key=lambda state: (distance[state], state))}
     return changed
 
 
@@ -380,8 +385,8 @@ def no_epsilon_and_deep_accept(nfa):
     return move_accept_to_deepest_state(drop_epsilon(nfa) or clone(nfa))
 
 
-def run_interventions(thresholds, entries):
-    rng = random.Random(INTERVENTION_SEED)
+def run_interventions(thresholds, entries, seed=INTERVENTION_SEED):
+    rng = random.Random(seed)
     changes = [
         ("single accepting state (keep deepest)", keep_deepest_accept, False),
         ("move accepting state to the deepest state", move_accept_to_deepest_state, False),
@@ -430,13 +435,108 @@ def run_interventions(thresholds, entries):
     return pd.DataFrame(rows).round(2)
 
 
+def run_one_replication(task):
+    # One independent replication: a fresh balanced sample and its own intervention seed
+    thresholds, replication = task
+    entries, _, _ = generate_balanced_nfas(INTERVENTION_COUNT, seed=FRESH_SEED + replication)
+    rows = run_interventions(thresholds, entries, seed=INTERVENTION_SEED + replication)
+    rows.insert(0, "replication", replication)
+    return rows
+
+
+INTERVAL_METRICS = ["mean_size_ratio", "median_size_ratio", "pct_grew", "pct_shrank", "pct_extreme_before", "pct_extreme_after"]
+
+
+def summarize_replications(by_replication):
+    # Mean over replications with a 95 % t interval; the interval reflects both which NFAs were drawn and which random
+    # edges / accepting states each change picked
+    rows = []
+    for change, group in by_replication.groupby("change", sort=False):
+        count = len(group)
+        row = {"change": change, "replications": count, "nfas_per_replication": group["nfas"].mean()}
+        for metric in INTERVAL_METRICS:
+            mean = group[metric].mean()
+            half_width = student_t.ppf(0.975, count - 1) * group[metric].std(ddof=1) / np.sqrt(count)
+            row[metric] = mean
+            row[metric + "_ci_low"] = mean - half_width
+            row[metric + "_ci_high"] = mean + half_width
+        rows.append(row)
+    return pd.DataFrame(rows).round(3)
+
+
+def run_replicated_interventions(thresholds, replications=REPLICATIONS):
+    with Pool() as pool:
+        frames = pool.map(run_one_replication, [(thresholds, replication) for replication in range(replications)])
+    by_replication = pd.concat(frames, ignore_index=True)
+    return by_replication, summarize_replications(by_replication)
+
+
+def plot_interventions(summary, path):
+    # Share of NFAs whose DFA grew / shrank under each change, with 95 % intervals over the replications
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from experiments.blowup_experiment_10k import use_georgia
+
+    use_georgia()
+    labels = {
+        "single accepting state (keep deepest)": "One accepting state (deepest)",
+        "move accepting state to the deepest state": "Accepting state moved deep",
+        "thin branching (cap at 2 destinations)": "Branching capped at 2",
+        "delete all ε edges": "No ε edges*",
+        "combined: no ε + one deep accepting state": "No ε + deep accepting state*",
+        "[control] add accepting states up to 3": "Control: add accepting states",
+        "[control] add one extra random edge per state": "Control: add random edges",
+    }
+    order = list(labels)
+    rows = summary.set_index("change").loc[order]
+    y = np.arange(len(order))[::-1]
+    height = 0.38
+
+    fig, ax = plt.subplots(figsize=(9, 5.6))
+    for offset, column, color, name in [(height / 2, "pct_grew", "#D9534F", "DFA grew"), (-height / 2, "pct_shrank", "#9E9E9E", "DFA shrank")]:
+        values = rows[column].to_numpy()
+        errors = np.array([values - rows[column + "_ci_low"].to_numpy(), rows[column + "_ci_high"].to_numpy() - values])
+        ax.barh(y + offset, values, height, color=color, label=name, xerr=errors, error_kw={"elinewidth": 1.2, "capsize": 3, "ecolor": "black"})
+        for position, value, high in zip(y + offset, values, rows[column + "_ci_high"]):
+            ax.text(high + 0.8, position, f"{value:.1f}", va="center", fontsize=9)
+
+    ax.set_yticks(y, [labels[name] for name in order])
+    ax.set_xlim(0, 80)
+    ax.set_xticks(range(0, 81, 10), [f"{tick}%" for tick in range(0, 81, 10)])
+    ax.grid(axis="x", color="#DDDDDD")
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_title("Share of NFAs whose DFA grew or shrank (same NFAs, before vs after)", fontsize=12)
+    ax.legend(frameon=False, loc="lower right")
+    count = int(rows["replications"].iloc[0])
+    fig.text(0.01, 0.01, f"Mean of {count} independent replications of ~{int(rows['nfas_per_replication'].min()):,}-{INTERVENTION_COUNT:,} NFAs each; "
+             "bars show 95% intervals across replications. *Removing ε edges also moves an NFA into the larger non-ε class.", fontsize=7.5, style="italic")
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.savefig(path, dpi=250)
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------- Main
+
+def run_interventions_step(thresholds, out_dir, experiment_dir, replications):
+    by_replication, summary = run_replicated_interventions(thresholds, replications)
+    by_replication.to_csv(out_dir / "interventions_by_replication.csv", index=False)
+    summary.to_csv(out_dir / "interventions.csv", index=False)
+    figures_dir = experiment_dir / "figures"
+    figures_dir.mkdir(exist_ok=True)
+    plot_interventions(summary, figures_dir / "interventions.png")
+    print(f"\n4. Paired interventions, {replications} independent replications (mean and 95% interval):")
+    print(summary[["change", "nfas_per_replication", "mean_size_ratio", "median_size_ratio", "pct_grew", "pct_grew_ci_low", "pct_grew_ci_high",
+                   "pct_shrank", "pct_extreme_before", "pct_extreme_after"]].to_string(index=False))
+
 
 def main():
     parser = argparse.ArgumentParser(description="Confirm which NFA traits lead to large DFAs")
     parser.add_argument("--experiment-dir", type=Path, default=EXPERIMENT_10K_DIR)
     parser.add_argument("--fresh-count", type=int, default=12_000, help="fresh random NFAs for the replication")
-    parser.add_argument("--intervention-count", type=int, default=4_000, help="of those, how many get paired changes")
+    parser.add_argument("--replications", type=int, default=REPLICATIONS, help="independent repeats of the intervention test")
+    parser.add_argument("--interventions-only", action="store_true", help="skip steps 1-3 and only (re)run the intervention test and its chart")
     args = parser.parse_args()
 
     out_dir = args.experiment_dir / "trait_confirmation"
@@ -444,6 +544,11 @@ def main():
 
     df = load_features(args.experiment_dir)
     thresholds = get_thresholds(df)
+
+    if args.interventions_only:
+        run_interventions_step(thresholds, out_dir, args.experiment_dir, args.replications)
+        return
+
     print(f"{len(df)} random NFAs, {int(df['extreme'].sum())} extreme (top 5% of their class and size)")
 
     z_differences = feature_z_differences(df)
@@ -465,10 +570,7 @@ def main():
     print(summary.T.to_string(header=False))
     print(by_class.to_string(index=False))
 
-    interventions = run_interventions(thresholds, entries[:args.intervention_count])
-    interventions.to_csv(out_dir / "interventions.csv", index=False)
-    print(f"\n4. Paired interventions on {args.intervention_count} of the fresh NFAs:")
-    print(interventions.to_string(index=False))
+    run_interventions_step(thresholds, out_dir, args.experiment_dir, args.replications)
 
     print(f"\nWrote CSVs to {out_dir}")
 

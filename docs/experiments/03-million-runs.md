@@ -31,4 +31,13 @@ Each is split evenly over the six classes, **distinct by full sha256 key** (dupl
 
 The ceiling is reachable by chance only for NFAs of about 5–6 states. At 12 states, DFA size peaks at roughly 24–35 transitions and falls off on both sides: too little non-determinism leaves nothing to track, too much makes the subsets collapse.
 
+**Extra charts.** `python -m experiments.blowup_experiment_1m --scatter-only --out-dir <folder>` redraws, from the existing database, `figures/ceiling_scatter.png` (the left panel alone, legend beside the axes) and `figures/ceiling_hexbin.png` (all one million NFAs binned into hexagons coloured by count, to avoid overplotting).
+
+**Matched baselines for the structured runs.** [Experiment 6](06-structured-nfas.md) needs one million unrestricted NFAs *without ε edges* at 5, 6 and 7 states. Each size is generated as 2,000,000 NFAs, whose non-ε half (sparse, mixed, dense) is the baseline:
+
+```
+python -m experiments.blowup_experiment_1m --count 2000000 --seed 3 --min-states 6 --max-states 6 --out-dir ../data/experiment_unrestricted_6_states_2m
+```
+(likewise for 5 and 7; about 75 s each, folders `experiment_unrestricted_<n>_states_2m`).
+
 **Notes.** These runs predate the sorted-alphabet fix (commit `e3d4593`), so their seeds do not regenerate the same NFAs byte for byte; sizes are unaffected. The database stores keys, features and sizes, not the NFAs.

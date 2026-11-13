@@ -16,18 +16,24 @@ Project: how much larger is the DFA than the NFA it came from, and which NFAs bl
 3. [Million-NFA runs](experiments/03-million-runs.md)
 4. [Ceiling hunt, 6 states](experiments/04-ceiling-hunt.md)
 5. [Visualizations](experiments/05-visualizations.md)
+6. [Structured NFAs, 5 / 6 / 7 states](experiments/06-structured-nfas.md) (generate only NFAs shaped like the ceiling hits)
 
 ## Code layout
 
 ```
 src/
   core/            automata.py      NFA, DFA, generator, subset construction, Moore minimization
+                   regex.py         DFA / NFA to regular expression (state elimination) and a checker
   experiments/     blowup_experiment.py        first sweep, DuckDB views, base plots
                    blowup_experiment_10k.py    balanced 10k run, violin and ceiling plots
                    blowup_experiment_1m.py     million-NFA runs (parallel)
                    trait_confirmation.py       feature search, replication, interventions
                    feature_search_extras.py    p-values, random forest, robustness of the feature search
                    ceiling_hunt.py             find NFAs that reach the ceiling
+                   ceiling_hits_regex.py       regular expressions of the ceiling NFAs
+                   structured_nfa_experiment.py  NFAs with one undefined slot, 1-3 non-det. pairs, no ε (--states 5/6/7)
+                   structured_summary_table.py   the 5/6/7-state comparison table (PNG)
+                   blowup_family_chart.py      NFA vs DFA states for the blow-up family
   visualization/   visualize_dfa.py, visualize_nfa.py, render_running_example.py, render_ceiling_hits.py
   nfa-generator.py                             earlier stub, unused
 nfa-generator.ipynb                            original notebook (generator, subset construction, Moore)

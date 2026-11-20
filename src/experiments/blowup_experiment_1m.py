@@ -24,6 +24,7 @@ import pandas as pd
 import seaborn as sns
 
 from core.automata import generate_nfa, minimize_dfa, nfa_to_dfa
+from core.validate import validate_nfa
 from experiments.blowup_experiment import DATABASE_NAME, ROOT_DIR, classify_sweep_nfa, get_structural_features
 from experiments.blowup_experiment_10k import CLASS_COLORS, RANDOM_CLASSES, class_quotas, style_axis, use_georgia
 
@@ -31,6 +32,8 @@ EXPERIMENT_1M_DIR = ROOT_DIR / "data" / "experiment_1m"
 SHARD_SIZE = 5_000
 SEEDS_PER_SHARD = 10_000_000      # each shard draws NFA seeds from its own block, so shards never repeat an NFA
 VIOLIN_SAMPLE = 30_000            # points per class used to draw each violin's shape (medians use every point)
+RANDOM_STRING_SHARE = 0.01        # share of NFAs that also get the random-string check (the exact checks run on every NFA)
+RANDOM_STRING_COUNT = 500
 SCATTER_SAMPLE = 40_000           # points drawn in the scatter (the envelope uses every point)
 
 
@@ -56,12 +59,14 @@ def get_dedup_key(nfa):
 
 def run_shard(task):
     # One shard: `count` distinct NFAs of one class, with the same parameter distribution as the earlier sweeps
-    nfa_type, shard_id, count, seed, min_states, max_states = task
+    nfa_type, shard_id, count, seed, min_states, max_states, random_share = task
     param_rng = random.Random(seed * 1_000_003 + shard_id)
     nfa_seed = (shard_id + 1) * SEEDS_PER_SHARD
     seen_keys = set()
     rows = []
     num_failed = 0
+    checks = {"exact": 0, "random": 0}
+    sample_rng = random.Random(seed * 7_919 + shard_id)
 
     while len(rows) < count:
         params = {
@@ -90,6 +95,10 @@ def run_shard(task):
         seen_keys.add(key)
         subset_dfa = nfa_to_dfa(nfa)
         min_dfa = minimize_dfa(subset_dfa)
+        # Raises ValidationFailure (and so stops the whole run) on the first disagreement
+        random_seed = params["seed"] if sample_rng.random() < random_share else None
+        checks["random"] += validate_nfa(nfa, subset_dfa, min_dfa, f"seed {params['seed']}", random_seed, RANDOM_STRING_COUNT)
+        checks["exact"] += 1
         features = get_structural_features(nfa)
 
         rows.append({
@@ -104,16 +113,17 @@ def run_shard(task):
             "dfa_states": len(min_dfa.states),
         })
 
-    return rows, num_failed
+    return rows, num_failed, checks
 
 
-def generate_distinct_nfas(total, seed, min_states, max_states, workers):
+def generate_distinct_nfas(total, seed, min_states, max_states, workers, random_share=RANDOM_STRING_SHARE):
     # Shards run in parallel; duplicates across shards are removed and topped up until every class has its quota
     quotas = class_quotas(total, RANDOM_CLASSES)
     kept = {name: [] for name in RANDOM_CLASSES}
     seen_keys = set()
     num_failed = 0
     num_duplicates = 0
+    checks = {"exact": 0, "random": 0}
     next_shard = {name: 0 for name in RANDOM_CLASSES}
     start = time.time()
 
@@ -123,7 +133,7 @@ def generate_distinct_nfas(total, seed, min_states, max_states, workers):
             missing = quotas[name] - len(kept[name])
             while missing > 0:
                 size = min(SHARD_SIZE, missing)
-                tasks.append((name, next_shard[name] + index * 100_000, size, seed, min_states, max_states))
+                tasks.append((name, next_shard[name] + index * 100_000, size, seed, min_states, max_states, random_share))
                 next_shard[name] += 1
                 missing -= size
         return tasks
@@ -135,8 +145,10 @@ def generate_distinct_nfas(total, seed, min_states, max_states, workers):
             if not tasks:
                 break
 
-            for rows, failed in pool.imap_unordered(run_shard, tasks):
+            for rows, failed, shard_checks in pool.imap_unordered(run_shard, tasks):
                 num_failed += failed
+                checks["exact"] += shard_checks["exact"]
+                checks["random"] += shard_checks["random"]
 
                 for row in rows:
                     if row["nfa_key"] in seen_keys:
@@ -149,7 +161,7 @@ def generate_distinct_nfas(total, seed, min_states, max_states, workers):
                 print(f"  {done:>9,} / {total:,} NFAs  ({time.time() - start:.0f}s)", flush=True)
 
     records = [row for name in RANDOM_CLASSES for row in kept[name]]
-    return pd.DataFrame(records), num_failed, num_duplicates
+    return pd.DataFrame(records), num_failed, num_duplicates, checks
 
 
 # ---------------------------------------------------------------- Summaries
@@ -404,6 +416,7 @@ def main():
     parser.add_argument("--min-states", type=int, default=5)
     parser.add_argument("--max-states", type=int, default=12)
     parser.add_argument("--workers", type=int, default=None, help="default: one per CPU core")
+    parser.add_argument("--random-share", type=float, default=RANDOM_STRING_SHARE, help="share of NFAs that also get the random-string check")
     parser.add_argument("--out-dir", type=Path, default=EXPERIMENT_1M_DIR)
     parser.add_argument("--scatter-only", action="store_true",
                         help="redraw only the single-panel figures (ceiling_scatter, ceiling_hexbin) from the existing database, generating nothing new")
@@ -424,11 +437,16 @@ def main():
 
     print(f"Generating {args.count:,} distinct NFAs on {workers} workers ...", flush=True)
     start = time.time()
-    df, num_failed, num_duplicates = generate_distinct_nfas(args.count, args.seed, args.min_states, args.max_states, workers)
+    df, num_failed, num_duplicates, checks = generate_distinct_nfas(args.count, args.seed, args.min_states, args.max_states, workers, args.random_share)
     print(f"Done in {time.time() - start:.0f}s: {len(df):,} distinct NFAs "
           f"({num_failed:,} draws with no reachable NFA, {num_duplicates:,} duplicates dropped)", flush=True)
 
     assert df["nfa_key"].is_unique and len(df) == args.count
+    # Checks ran inside the workers, on every NFA a worker generated (that includes the duplicates dropped afterwards)
+    with open(args.out_dir / "validation.json", "w") as file:
+        json.dump({"nfas_kept": len(df), "nfas_validated_exact": checks["exact"], "nfas_validated_random_strings": checks["random"],
+                   "strings_per_nfa": RANDOM_STRING_COUNT, "max_string_length": 20, "random_share": args.random_share,
+                   "exact_checks": ["NFA vs subset DFA", "subset DFA vs minimized DFA"], "failures": 0}, file, indent=2)
     df = add_size_columns(df)
 
     database = args.out_dir / DATABASE_NAME

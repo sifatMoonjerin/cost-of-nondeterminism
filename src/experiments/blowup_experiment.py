@@ -256,7 +256,8 @@ def save_to_duckdb(df, path):
             FROM {source} GROUP BY {column} ORDER BY {order_by}
         """)
 
-    # Smaller / same size / larger than the NFA, for the minimized DFA and for the raw subset-construction DFA
+    # Smaller / same size / larger than the NFA, for the minimized DFA and for the raw subset-construction DFA.
+    # Three decimals: the bar labels round these again, and rounding 84.523 to 84.5 first would print 84.5 as "84%".
     for view, size_column in [
         ("size_outcome_by_type", "dfa_states"),
         ("subset_size_outcome_by_type", "subset_states"),
@@ -264,9 +265,9 @@ def save_to_duckdb(df, path):
         con.execute(f"""
             CREATE VIEW {view} AS
             SELECT nfa_type, count(*) AS nfas,
-                   round(100 * avg(({size_column} < original_states)::INT), 1) AS pct_smaller,
-                   round(100 * avg(({size_column} = original_states)::INT), 1) AS pct_equal,
-                   round(100 * avg(({size_column} > original_states)::INT), 1) AS pct_larger
+                   round(100 * avg(({size_column} < original_states)::INT), 3) AS pct_smaller,
+                   round(100 * avg(({size_column} = original_states)::INT), 3) AS pct_equal,
+                   round(100 * avg(({size_column} > original_states)::INT), 3) AS pct_larger
             FROM nfa_results GROUP BY nfa_type ORDER BY pct_larger DESC
         """)
 

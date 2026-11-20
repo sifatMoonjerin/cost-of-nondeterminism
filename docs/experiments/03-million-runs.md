@@ -40,4 +40,4 @@ python -m experiments.blowup_experiment_1m --count 2000000 --seed 3 --min-states
 ```
 (likewise for 5 and 7; about 75 s each, folders `experiment_unrestricted_<n>_states_2m`).
 
-**Notes.** These runs predate the sorted-alphabet fix (commit `e3d4593`), so their seeds do not regenerate the same NFAs byte for byte; sizes are unaffected. The database stores keys, features and sizes, not the NFAs.
+**Notes.** These runs were first made before the sorted-alphabet fix (commit `e3d4593`) and then rerun after it; see [experiment 7](07-validation.md). Every shared seed has identical sizes. The rerun results are in these folders and the numbers above are unchanged. Each run also writes `validation.json` (inline equivalence checks, `--random-share` of the NFAs also get the random-string check). The database stores keys, features and sizes, not the NFAs.

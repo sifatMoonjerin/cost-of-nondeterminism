@@ -7,6 +7,7 @@ Project: how much larger is the DFA than the NFA it came from, and which NFAs bl
 | [terms.md](terms.md) | Definitions: sparse / dense / mixed as ratios, sizes, ceiling, features, "extreme" |
 | [feature-search.md](feature-search.md) | How the traits behind large DFAs were found |
 | [trait-tests.md](trait-tests.md) | How those traits were tested (replication and one-change-at-a-time tests) |
+| [paper-figure-map.md](paper-figure-map.md) | Which script and data produce each figure and table of the paper (`final-report-edited.tex`) |
 | [experiments/](experiments/) | One short page per experiment, in the order below |
 
 ## Experiments
@@ -17,6 +18,7 @@ Project: how much larger is the DFA than the NFA it came from, and which NFAs bl
 4. [Ceiling hunt, 6 states](experiments/04-ceiling-hunt.md)
 5. [Visualizations](experiments/05-visualizations.md)
 6. [Structured NFAs, 5 / 6 / 7 states](experiments/06-structured-nfas.md) (generate only NFAs shaped like the ceiling hits)
+7. [Validation and rerun](experiments/07-validation.md) (correctness checks on every experiment, and the rerun after the generator fix)
 
 ## Code layout
 
@@ -24,6 +26,7 @@ Project: how much larger is the DFA than the NFA it came from, and which NFAs bl
 src/
   core/            automata.py      NFA, DFA, generator, subset construction, Moore minimization
                    regex.py         DFA / NFA to regular expression (state elimination) and a checker
+                   validate.py      independent equivalence checks: NFA, subset DFA, minimized DFA
   experiments/     blowup_experiment.py        first sweep, DuckDB views, base plots
                    blowup_experiment_10k.py    balanced 10k run, violin and ceiling plots
                    blowup_experiment_1m.py     million-NFA runs (parallel)
@@ -33,6 +36,7 @@ src/
                    ceiling_hits_regex.py       regular expressions of the ceiling NFAs
                    structured_nfa_experiment.py  NFAs with one undefined slot, 1-3 non-det. pairs, no ε (--states 5/6/7)
                    structured_summary_table.py   the 5/6/7-state comparison table (PNG)
+                   validate_runs.py            run the equivalence checks over the experiments
                    blowup_family_chart.py      NFA vs DFA states for the blow-up family
   visualization/   visualize_dfa.py, visualize_nfa.py, render_running_example.py, render_ceiling_hits.py
   nfa-generator.py                             earlier stub, unused

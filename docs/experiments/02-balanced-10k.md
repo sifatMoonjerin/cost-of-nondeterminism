@@ -19,4 +19,4 @@ python -m experiments.blowup_experiment_10k            # --count 10000 --seed 1
 
 **Findings.** Share with a larger minimized DFA: sparse 82 %, sparse-ε 56 %, mixed 51 %, mixed-ε 25 %, dense 18 %, dense-ε 6 %. Median size ratio among the larger ones: 2.3×, 1.8×, 2.0×, 1.6×, 1.5×, 1.3×. The best random NFA reaches 69 % of its ceiling; 41 of 10,000 get more than three quarters of the way there in the exponent.
 
-**Note.** Rerun after the blow-up state-count fix: the 10,000 random rows are identical to the first run, only the blow-up rows changed.
+**Note.** Rerun after the blow-up state-count fix: the 10,000 random rows are identical to the first run, only the blow-up rows changed. Rerun again after the sorted-alphabet fix: every NFA, id and size is identical, and so are the trait CSVs ([experiment 7](07-validation.md)).

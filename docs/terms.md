@@ -91,6 +91,6 @@ Computed in `get_structural_features` (`blowup_experiment.py`) and `get_graph_fe
 
 | Term | Definition |
 |---|---|
-| **Seed** | `generate_nfa(seed=…)` seeds a private `random.Random`. Since the sorted-alphabet fix (commit `e3d4593`) a seed always gives the same NFA. Earlier runs could give the 0/1-swapped copy; DFA sizes are unaffected. |
+| **Seed** | `generate_nfa(seed=…)` seeds a private `random.Random`. Since the sorted-alphabet fix (commit `e3d4593`) a seed always gives the same NFA. Earlier runs could give the 0/1-swapped copy; DFA sizes are unaffected, and the affected runs were rerun (see [experiments/07-validation.md](experiments/07-validation.md)). |
 | **NFA key** | sha256 of a canonical sorted form (states, alphabet, start, accepting, transitions). Two NFAs are *distinct* when their keys differ. |
 | **Canonical key** | the smaller of an NFA's key and its 0/1-swapped copy's key; used by `ceiling_hunt.py` so a mirror image counts as a duplicate. |
